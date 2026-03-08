@@ -67,9 +67,6 @@ layout: default
 
     {% if site.comments.provider and page.comments %}
       {% if jekyll.environment == 'production' %}
-        {% if site.comments.provider == 'supabase' %}
-          {% include reactions-supabase.html %}
-        {% endif %}
         {% include comments.html %}
       {% else %}
         <p>
