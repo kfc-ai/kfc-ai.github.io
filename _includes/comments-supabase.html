@@ -1,0 +1,259 @@
+{% comment %}
+  Supabase 익명 댓글 위젯
+  필요 설정: site.supabase_url, site.supabase_anon_key
+{% endcomment %}
+
+<h4 class="page__comments-title">{{ site.data.ui-text[site.locale].comments_label | default: "댓글" }}</h4>
+
+<style>
+.sb-comments{margin-top:1em}
+.sb-form{margin-bottom:2em}
+.sb-form__group{margin-bottom:.75em}
+.sb-form__label{display:block;margin-bottom:.25em;font-size:.75em;color:#6f777d;text-transform:uppercase;font-weight:700;letter-spacing:.5px}
+.sb-form__input,.sb-form__textarea{width:100%;padding:.5em;border:1px solid #e0e0e0;border-radius:4px;font-family:inherit;font-size:1em;box-sizing:border-box;background:#fff;color:#494e52;transition:border-color .2s}
+.sb-form__input:focus,.sb-form__textarea:focus{outline:none;border-color:#3d4144}
+.sb-form__textarea{resize:vertical;min-height:80px}
+.sb-form__nickname{max-width:250px}
+.sb-form__hp{position:absolute;left:-9999px;opacity:0;height:0;overflow:hidden}
+.sb-form__submit{display:inline-block;padding:.5em 1em;font-family:inherit;font-size:.85em;font-weight:700;color:#fff;background-color:#3d4144;border:none;border-radius:4px;cursor:pointer;transition:background-color .2s}
+.sb-form__submit:hover{background-color:#494e52}
+.sb-form__submit:disabled{opacity:.5;cursor:not-allowed}
+.sb-comment{padding:1em 0;border-bottom:1px solid #f0f0f0}
+.sb-comment:last-child{border-bottom:none}
+.sb-comment__header{display:flex;align-items:center;gap:.5em;margin-bottom:.4em}
+.sb-comment__nickname{font-weight:700;font-size:.9em;color:#3d4144}
+.sb-comment__date{font-size:.75em;color:#999}
+.sb-comment__content{font-size:.9em;line-height:1.6;color:#494e52;white-space:pre-wrap;word-break:break-word}
+.sb-comment__reply-btn{background:none;border:none;color:#6f777d;font-size:.75em;cursor:pointer;padding:.25em 0;margin-top:.25em}
+.sb-comment__reply-btn:hover{color:#3d4144;text-decoration:underline}
+.sb-comment--reply{margin-left:2em;padding-left:1em;border-left:2px solid #e8e8e8}
+.sb-reply-form{margin:.75em 0 .75em 2em;padding:1em;background:#fafafa;border-radius:4px;border-left:2px solid #e0e0e0}
+.sb-reply-form .sb-form__group{margin-bottom:.5em}
+.sb-reply-form .sb-form__textarea{min-height:60px}
+.sb-reply-form__actions{display:flex;gap:.5em;align-items:center}
+.sb-reply-form__cancel{background:none;border:1px solid #e0e0e0;padding:.5em 1em;font-family:inherit;font-size:.85em;border-radius:4px;cursor:pointer;color:#6f777d}
+.sb-reply-form__cancel:hover{border-color:#999}
+.sb-status{padding:.75em;border-radius:4px;margin-bottom:1em;font-size:.85em}
+.sb-status--error{background:#fce4ec;color:#c62828}
+.sb-status--success{background:#e8f5e9;color:#2e7d32}
+.sb-empty{color:#999;font-size:.9em;font-style:italic;padding:1em 0}
+.sb-loading{color:#999;font-size:.9em;padding:1em 0}
+</style>
+
+<div class="sb-comments" id="sb-comments">
+  <form class="sb-form" id="sb-main-form" onsubmit="return false;">
+    <div class="sb-form__hp" aria-hidden="true">
+      <label for="sb-hp">이 필드를 비워두세요</label>
+      <input type="text" id="sb-hp" name="sb-hp" tabindex="-1" autocomplete="off">
+    </div>
+    <div class="sb-form__group">
+      <label class="sb-form__label" for="sb-nickname">닉네임</label>
+      <input class="sb-form__input sb-form__nickname" type="text" id="sb-nickname" maxlength="30" required>
+    </div>
+    <div class="sb-form__group">
+      <label class="sb-form__label" for="sb-content">내용</label>
+      <textarea class="sb-form__textarea" id="sb-content" maxlength="1000" required></textarea>
+    </div>
+    <button class="sb-form__submit" type="button" id="sb-submit">등록</button>
+  </form>
+
+  <div id="sb-status"></div>
+  <div id="sb-comment-list">
+    <div class="sb-loading">댓글을 불러오는 중...</div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+(function() {
+  var SUPABASE_URL = '{{ site.supabase_url }}';
+  var SUPABASE_KEY = '{{ site.supabase_anon_key }}';
+  var PAGE_SLUG = '{{ page.url }}';
+  var COOLDOWN_MS = 10000;
+  var lastSubmitTime = 0;
+  var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  function escapeHtml(str) {
+    var d = document.createElement('div');
+    d.appendChild(document.createTextNode(str));
+    return d.innerHTML;
+  }
+
+  function showStatus(msg, type) {
+    var el = document.getElementById('sb-status');
+    el.innerHTML = '<div class="sb-status sb-status--' + type + '">' + escapeHtml(msg) + '</div>';
+    setTimeout(function() { el.innerHTML = ''; }, 3000);
+  }
+
+  function formatDate(iso) {
+    var d = new Date(iso);
+    return d.getFullYear() + '.' +
+      String(d.getMonth() + 1).padStart(2, '0') + '.' +
+      String(d.getDate()).padStart(2, '0') + ' ' +
+      String(d.getHours()).padStart(2, '0') + ':' +
+      String(d.getMinutes()).padStart(2, '0');
+  }
+
+  function renderComment(c, isReply) {
+    var replyBtn = isReply ? '' :
+      '<button class="sb-comment__reply-btn" data-reply-id="' + c.id + '">답글</button>';
+    return '<div class="sb-comment' + (isReply ? ' sb-comment--reply' : '') + '" data-id="' + c.id + '">' +
+      '<div class="sb-comment__header">' +
+        '<span class="sb-comment__nickname">' + escapeHtml(c.nickname) + '</span>' +
+        '<span class="sb-comment__date">' + formatDate(c.created_at) + '</span>' +
+      '</div>' +
+      '<div class="sb-comment__content">' + escapeHtml(c.content) + '</div>' +
+      replyBtn +
+    '</div>';
+  }
+
+  function loadComments() {
+    var listEl = document.getElementById('sb-comment-list');
+    sb.from('comments')
+      .select('*')
+      .eq('page_slug', PAGE_SLUG)
+      .order('created_at', { ascending: false })
+      .then(function(res) {
+        if (res.error) {
+          listEl.innerHTML = '<div class="sb-status sb-status--error">댓글을 불러올 수 없습니다.</div>';
+          return;
+        }
+        var data = res.data;
+        if (!data || data.length === 0) {
+          listEl.innerHTML = '<div class="sb-empty">아직 댓글이 없습니다. 첫 댓글을 남겨보세요!</div>';
+          return;
+        }
+
+        var parents = data.filter(function(c) { return !c.parent_id; });
+        var replies = data.filter(function(c) { return c.parent_id; });
+        var html = '';
+
+        parents.forEach(function(comment) {
+          html += renderComment(comment, false);
+          replies
+            .filter(function(r) { return r.parent_id === comment.id; })
+            .sort(function(a, b) { return new Date(a.created_at) - new Date(b.created_at); })
+            .forEach(function(reply) {
+              html += renderComment(reply, true);
+            });
+        });
+
+        listEl.innerHTML = html;
+      });
+  }
+
+  function submitComment(nickname, content, parentId) {
+    return sb.from('comments').insert({
+      page_slug: PAGE_SLUG,
+      nickname: nickname,
+      content: content,
+      parent_id: parentId || null
+    });
+  }
+
+  function checkCooldown() {
+    if (Date.now() - lastSubmitTime < COOLDOWN_MS) {
+      showStatus('잠시 후에 다시 시도해주세요.', 'error');
+      return false;
+    }
+    return true;
+  }
+
+  // Main submit
+  document.getElementById('sb-submit').addEventListener('click', function() {
+    if (document.getElementById('sb-hp').value) return;
+    if (!checkCooldown()) return;
+
+    var nickname = document.getElementById('sb-nickname').value.trim();
+    var content = document.getElementById('sb-content').value.trim();
+    if (!nickname || !content) {
+      showStatus('닉네임과 내용을 모두 입력해주세요.', 'error');
+      return;
+    }
+
+    var btn = this;
+    btn.disabled = true;
+    submitComment(nickname, content, null).then(function(res) {
+      btn.disabled = false;
+      if (res.error) {
+        showStatus('댓글 등록에 실패했습니다.', 'error');
+        return;
+      }
+      lastSubmitTime = Date.now();
+      document.getElementById('sb-content').value = '';
+      showStatus('댓글이 등록되었습니다.', 'success');
+      loadComments();
+    });
+  });
+
+  // Reply toggle (event delegation)
+  document.getElementById('sb-comment-list').addEventListener('click', function(e) {
+    var btn = e.target.closest('[data-reply-id]');
+    if (!btn) return;
+
+    var parentId = btn.getAttribute('data-reply-id');
+    var existing = document.querySelector('.sb-reply-form');
+    if (existing) {
+      if (existing.dataset.parentId === parentId) { existing.remove(); return; }
+      existing.remove();
+    }
+
+    var parentEl = document.querySelector('[data-id="' + parentId + '"]');
+    var insertAfter = parentEl;
+    var next = parentEl.nextElementSibling;
+    while (next && next.classList.contains('sb-comment--reply')) {
+      insertAfter = next;
+      next = next.nextElementSibling;
+    }
+
+    var form = document.createElement('div');
+    form.className = 'sb-reply-form';
+    form.dataset.parentId = parentId;
+    form.innerHTML =
+      '<div class="sb-form__hp" aria-hidden="true"><input type="text" class="sb-reply-hp" tabindex="-1" autocomplete="off"></div>' +
+      '<div class="sb-form__group"><label class="sb-form__label">닉네임</label>' +
+        '<input class="sb-form__input sb-form__nickname sb-reply-nickname" type="text" maxlength="30" required></div>' +
+      '<div class="sb-form__group"><label class="sb-form__label">내용</label>' +
+        '<textarea class="sb-form__textarea sb-reply-content" maxlength="1000" required></textarea></div>' +
+      '<div class="sb-reply-form__actions">' +
+        '<button class="sb-form__submit sb-reply-submit" type="button">등록</button>' +
+        '<button class="sb-reply-form__cancel sb-reply-cancel" type="button">취소</button></div>';
+
+    insertAfter.after(form);
+
+    var mainNick = document.getElementById('sb-nickname').value.trim();
+    if (mainNick) form.querySelector('.sb-reply-nickname').value = mainNick;
+    form.querySelector('.sb-reply-content').focus();
+
+    form.querySelector('.sb-reply-cancel').addEventListener('click', function() { form.remove(); });
+
+    form.querySelector('.sb-reply-submit').addEventListener('click', function() {
+      if (form.querySelector('.sb-reply-hp').value) return;
+      if (!checkCooldown()) return;
+
+      var nick = form.querySelector('.sb-reply-nickname').value.trim();
+      var cont = form.querySelector('.sb-reply-content').value.trim();
+      if (!nick || !cont) {
+        showStatus('닉네임과 내용을 모두 입력해주세요.', 'error');
+        return;
+      }
+
+      var submitBtn = this;
+      submitBtn.disabled = true;
+      submitComment(nick, cont, parentId).then(function(res) {
+        submitBtn.disabled = false;
+        if (res.error) {
+          showStatus('답글 등록에 실패했습니다.', 'error');
+          return;
+        }
+        lastSubmitTime = Date.now();
+        showStatus('답글이 등록되었습니다.', 'success');
+        form.remove();
+        loadComments();
+      });
+    });
+  });
+
+  loadComments();
+})();
+</script>

@@ -14,6 +14,10 @@
 # remote_theme           : "mmistakes/minimal-mistakes"
 minimal_mistakes_skin    : "default" # "air", "aqua", "contrast", "dark", "dirt", "neon", "mint", "plum", "sunrise"
 
+# Supabase (댓글 시스템)
+supabase_url             : "https://usonwpmhprrdmmvabwft.supabase.co"    # 예: https://abcdefg.supabase.co
+supabase_anon_key        : "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVzb253cG1ocHJyZG1tdmFid2Z0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5NDczMDAsImV4cCI6MjA4ODUyMzMwMH0.pmZvacBxMJYWRk3s5zNTl_xiAQ-ctTmYQKRHJXieiMg"       # 예: eyJhbGciOiJIUzI1NiIs...
+
 # Site Settings
 locale                   : "ko-KR"
 rtl                      : # true, false (default) # turns direction of the page into right to left for RTL languages
@@ -34,9 +38,7 @@ enable_copy_code_button  : # true, false (default)
 copyright                : # "copyright" name, defaults to site.title
 copyright_url            : # "copyright" URL, defaults to site.url
 comments:
-  provider               : "disqus" # false (default), "disqus", "discourse", "facebook", "staticman", "staticman_v2", "utterances", "giscus", "custom"
-  disqus:
-    shortname            : "krpack"
+  provider               : "supabase" # false (default), "discourse", "facebook", "staticman", "staticman_v2", "utterances", "giscus", "supabase", "custom"
   discourse:
     server               : # https://meta.discourse.org/t/embedding-discourse-comments-via-javascript/31963 , e.g.: meta.discourse.org
   facebook:
