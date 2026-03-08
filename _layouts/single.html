@@ -65,6 +65,12 @@ layout: default
       {% include post_pagination.html %}
     </div>
 
+    {% if site.comments.provider == 'supabase' and page.comments %}
+      {% if jekyll.environment == 'production' %}
+        {% include reactions-supabase.html %}
+      {% endif %}
+    {% endif %}
+
     {% if site.comments.provider and page.comments %}
       {% if jekyll.environment == 'production' %}
         {% include comments.html %}
