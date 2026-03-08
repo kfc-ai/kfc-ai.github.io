@@ -62,4 +62,42 @@ CREATE POLICY "Anyone can insert reactions"
   ON reactions FOR INSERT
   WITH CHECK (true);
 
--- UPDATE, DELETE 정책은 생성하지 않으므로 한 번 투표하면 변경/삭제 불가
+-- UPDATE, DELETE는 RPC 함수(SECURITY DEFINER)가 처리하므로 직접 정책 불필요
+
+-- ============================================
+-- 리액션 토글 RPC 함수 (투표 취소/변경 지원)
+-- ============================================
+
+-- 11. toggle_reaction 함수
+-- 동작: 없으면 INSERT, 같은 타입이면 DELETE(취소), 다른 타입이면 UPDATE(변경)
+CREATE OR REPLACE FUNCTION toggle_reaction(
+  p_page_slug TEXT,
+  p_type TEXT,
+  p_voter_hash TEXT
+) RETURNS JSON
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  existing RECORD;
+BEGIN
+  SELECT * INTO existing FROM reactions
+  WHERE page_slug = p_page_slug AND voter_hash = p_voter_hash;
+
+  IF existing IS NULL THEN
+    INSERT INTO reactions (page_slug, type, voter_hash)
+    VALUES (p_page_slug, p_type, p_voter_hash);
+    RETURN json_build_object('action', 'inserted', 'type', p_type);
+  ELSIF existing.type = p_type THEN
+    DELETE FROM reactions WHERE id = existing.id;
+    RETURN json_build_object('action', 'deleted', 'type', NULL);
+  ELSE
+    UPDATE reactions SET type = p_type WHERE id = existing.id;
+    RETURN json_build_object('action', 'updated', 'type', p_type);
+  END IF;
+END;
+$$;
+
+-- 12. anon 역할에 실행 권한 부여
+GRANT EXECUTE ON FUNCTION toggle_reaction(TEXT, TEXT, TEXT) TO anon;

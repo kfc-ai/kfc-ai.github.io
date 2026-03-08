@@ -1,15 +1,15 @@
 {% comment %}
-  Supabase 좋아요/싫어요 리액션 위젯
+  Supabase 좋아요/싫어요 리액션 위젯 (토글/변경 지원)
   필요 설정: site.supabase_url, site.supabase_anon_key
 {% endcomment %}
 
 <style>
 .sb-reactions{display:flex;align-items:center;gap:.75em;margin:2em 0 1.5em;padding:1em 0;border-top:1px solid #e0e0e0;border-bottom:1px solid #e0e0e0}
 .sb-reactions__btn{display:inline-flex;align-items:center;gap:.4em;padding:.5em 1.1em;border:1px solid #e0e0e0;border-radius:20px;background:#fff;color:#6f777d;font-family:inherit;font-size:.85em;cursor:pointer;transition:all .2s;-webkit-user-select:none;user-select:none}
-.sb-reactions__btn:hover:not(:disabled){border-color:#999;color:#494e52}
-.sb-reactions__btn:disabled{cursor:default}
+.sb-reactions__btn:hover{border-color:#999;color:#494e52}
 .sb-reactions__btn--like.active{background:#e8f5e9;border-color:#a5d6a7;color:#2e7d32}
 .sb-reactions__btn--dislike.active{background:#fce4ec;border-color:#ef9a9a;color:#c62828}
+.sb-reactions__btn.loading{opacity:.5;pointer-events:none}
 .sb-reactions__btn svg{width:16px;height:16px;fill:currentColor;flex-shrink:0}
 .sb-reactions__count{font-weight:700;min-width:1ch}
 </style>
@@ -42,6 +42,10 @@
   var likeCountEl = document.getElementById('sb-like-count');
   var dislikeCountEl = document.getElementById('sb-dislike-count');
 
+  var currentType = null; // 'like' | 'dislike' | null
+  var likesCount = 0;
+  var dislikesCount = 0;
+
   /* ── voter fingerprint ── */
   function getVoterHash() {
     var stored = localStorage.getItem('sb_voter_hash');
@@ -64,12 +68,29 @@
     return hash;
   }
 
-  /* ── UI helpers ── */
-  function setVotedState(type) {
-    likeBtn.disabled = true;
-    dislikeBtn.disabled = true;
-    if (type === 'like') likeBtn.classList.add('active');
-    else dislikeBtn.classList.add('active');
+  /* ── UI update ── */
+  function updateUI() {
+    likeCountEl.textContent = likesCount;
+    dislikeCountEl.textContent = dislikesCount;
+
+    likeBtn.classList.remove('active');
+    dislikeBtn.classList.remove('active');
+
+    if (currentType === 'like') {
+      likeBtn.classList.add('active');
+    } else if (currentType === 'dislike') {
+      dislikeBtn.classList.add('active');
+    }
+  }
+
+  function setLoading(on) {
+    if (on) {
+      likeBtn.classList.add('loading');
+      dislikeBtn.classList.add('loading');
+    } else {
+      likeBtn.classList.remove('loading');
+      dislikeBtn.classList.remove('loading');
+    }
   }
 
   /* ── load counts + check existing vote ── */
@@ -83,72 +104,73 @@
       .eq('page_slug', PAGE_SLUG)
       .then(function(res) {
         if (res.error || !res.data) return;
-        var likes = 0, dislikes = 0;
+        likesCount = 0;
+        dislikesCount = 0;
         res.data.forEach(function(r) {
-          if (r.type === 'like') likes++;
-          else if (r.type === 'dislike') dislikes++;
+          if (r.type === 'like') likesCount++;
+          else if (r.type === 'dislike') dislikesCount++;
         });
-        likeCountEl.textContent = likes;
-        dislikeCountEl.textContent = dislikes;
-      });
 
-    // 투표 상태 확인
-    if (localVote) {
-      setVotedState(localVote);
-    } else {
-      sb.from('reactions')
-        .select('type')
-        .eq('page_slug', PAGE_SLUG)
-        .eq('voter_hash', voterHash)
-        .maybeSingle()
-        .then(function(res) {
-          if (res.data) {
-            localStorage.setItem(STORAGE_KEY, res.data.type);
-            setVotedState(res.data.type);
-          }
-        });
-    }
-  }
-
-  /* ── vote handler ── */
-  function vote(type) {
-    if (localStorage.getItem(STORAGE_KEY)) return;
-
-    var voterHash = getVoterHash();
-    likeBtn.disabled = true;
-    dislikeBtn.disabled = true;
-
-    sb.from('reactions')
-      .insert({ page_slug: PAGE_SLUG, type: type, voter_hash: voterHash })
-      .then(function(res) {
-        if (res.error) {
-          // 중복 투표 (UNIQUE 위반)
-          if (res.error.code === '23505') {
-            sb.from('reactions')
-              .select('type')
-              .eq('page_slug', PAGE_SLUG)
-              .eq('voter_hash', voterHash)
-              .maybeSingle()
-              .then(function(r) {
-                var t = (r.data && r.data.type) || type;
-                localStorage.setItem(STORAGE_KEY, t);
-                setVotedState(t);
-              });
-          } else {
-            likeBtn.disabled = false;
-            dislikeBtn.disabled = false;
-          }
-          return;
+        // 투표 상태 확인
+        if (localVote) {
+          currentType = localVote === 'null' ? null : localVote;
         }
-        localStorage.setItem(STORAGE_KEY, type);
-        setVotedState(type);
-        var el = type === 'like' ? likeCountEl : dislikeCountEl;
-        el.textContent = parseInt(el.textContent || '0') + 1;
+        updateUI();
+
+        // localStorage에 없으면 DB에서 확인
+        if (!localVote) {
+          sb.from('reactions')
+            .select('type')
+            .eq('page_slug', PAGE_SLUG)
+            .eq('voter_hash', voterHash)
+            .maybeSingle()
+            .then(function(r) {
+              if (r.data) {
+                currentType = r.data.type;
+                localStorage.setItem(STORAGE_KEY, currentType);
+              }
+              updateUI();
+            });
+        }
       });
   }
 
-  likeBtn.addEventListener('click', function() { vote('like'); });
-  dislikeBtn.addEventListener('click', function() { vote('dislike'); });
+  /* ── toggle vote handler ── */
+  function toggleVote(type) {
+    setLoading(true);
+
+    sb.rpc('toggle_reaction', {
+      p_page_slug: PAGE_SLUG,
+      p_type: type,
+      p_voter_hash: getVoterHash()
+    }).then(function(res) {
+      setLoading(false);
+      if (res.error) return;
+
+      var data = res.data;
+      var action = data.action;
+      var newType = data.type || null;
+
+      // 카운트 업데이트
+      if (action === 'inserted') {
+        if (newType === 'like') likesCount++;
+        else dislikesCount++;
+      } else if (action === 'deleted') {
+        if (currentType === 'like') likesCount--;
+        else dislikesCount--;
+      } else if (action === 'updated') {
+        if (currentType === 'like') { likesCount--; dislikesCount++; }
+        else { dislikesCount--; likesCount++; }
+      }
+
+      currentType = newType;
+      localStorage.setItem(STORAGE_KEY, currentType === null ? 'null' : currentType);
+      updateUI();
+    });
+  }
+
+  likeBtn.addEventListener('click', function() { toggleVote('like'); });
+  dislikeBtn.addEventListener('click', function() { toggleVote('dislike'); });
 
   init();
 })();
